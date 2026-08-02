@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel Manajemen Bot VIP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#0b0e14] text-gray-200 font-sans p-6 min-h-screen">
+
+    <div class="max-w-6xl mx-auto space-y-6">
+        
+        <!-- HEADER PANEL -->
+        <div class="bg-[#131722] p-6 rounded-2xl border border-gray-800 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <h1 class="text-xl font-bold text-white flex items-center space-x-2">
+                    <span class="text-indigo-400">⚙️</span>
+                    <span>Panel Manajemen Bot VIP</span>
+                </h1>
+                <p class="text-xs text-gray-400 mt-1">Pemilik Lisensi: <span class="text-green-400 font-semibold">{{ owner }}</span> (<span class="text-indigo-300">{{ license_key }}</span>)</p>
+            </div>
+            <a href="/" class="bg-gray-800 hover:bg-gray-700 text-xs px-4 py-2.5 rounded-xl text-gray-300 font-semibold transition border border-gray-700">
+                ← Kembali ke Dashboard
+            </a>
+        </div>
+
+        <!-- TAMPERMONKEY LOADER URL -->
+        <div class="bg-[#131722] border border-indigo-900/40 p-4 rounded-2xl shadow-lg">
+            <div class="flex items-center space-x-2 text-indigo-400 text-xs font-bold mb-2">
+                <i class="fa-solid fa-thumbtack"></i>
+                <span>Tampermonkey Userscript Loader URL:</span>
+            </div>
+            <code class="text-xs bg-[#181e2b] border border-gray-800 p-3 rounded-xl block text-green-400 font-mono select-all overflow-x-auto">
+                http://206.189.142.167:8000/api/v1/get-script?license={{ license_key }}
+            </code>
+        </div>
+
+        <!-- REMOTE MULTI-BOT CONTROL SECTION -->
+        <div class="bg-[#131722] p-6 rounded-2xl border border-gray-800 shadow-xl space-y-6">
+            
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-4 gap-2">
+                <div>
+                    <h2 class="text-base font-bold text-white flex items-center space-x-2">
+                        <span>🤖 Remote Control & Multi-Switch Engine</span>
+                    </h2>
+                    <p class="text-xs text-gray-400">Pilih bot tertentu atau centang semua untuk memindahkan tujuan stream secara fleksibel.</p>
+                </div>
+                <div class="text-xs text-gray-400 bg-gray-900 px-3 py-1.5 rounded-lg border border-gray-800">
+                    Total Bot Terdeteksi: <span id="total-bots-count" class="text-green-400 font-bold">3 Bot</span>
+                </div>
+            </div>
+
+            <!-- ACTION CONTROL BAR -->
+            <div class="bg-[#181e2b] p-4 rounded-xl border border-gray-800 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                
+                <!-- Quick Pick Streamer from DB Dropdown -->
+                <div class="md:col-span-4">
+                    <label class="block text-[10px] text-gray-400 font-bold uppercase mb-1">Pilih dari Database Live Drops:</label>
+                    <select id="db-streamer-select" onchange="syncStreamerInput(this.value)" class="w-full bg-[#131722] border border-gray-700 text-xs text-white rounded-xl px-3 py-2.5 focus:outline-none focus:border-indigo-500">
+                        <option value="">-- Quick Select Streamer Gacor --</option>
+                        <option value="hstikkytokky">#1 hstikkytokky (6,717 Viewers) 🔥</option>
+                        <option value="schneckyrii">#2 schneckyrii (3,042 Viewers) 🔥</option>
+                        <option value="cdmatthews">#3 cdmatthews (2,216 Viewers)</option>
+                        <option value="eddie">#4 eddie (Special Stake Drops)</option>
+                    </select>
+                </div>
+
+                <!-- Manual Search Bar / Input Streamer -->
+                <div class="md:col-span-5">
+                    <label class="block text-[10px] text-gray-400 font-bold uppercase mb-1">Atau Ketik Nama Streamer:</label>
+                    <input type="text" id="target-streamer-input" placeholder="Masukkan nama channel (misal: eddie)" class="w-full bg-[#131722] border border-gray-700 text-xs text-white rounded-xl px-3 py-2.5 focus:outline-none focus:border-indigo-500">
+                </div>
+
+                <!-- Execute Button -->
+                <div class="md:col-span-3 flex items-end h-full pt-4 md:pt-0">
+                    <button onclick="executeMultiSwitch()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition shadow-lg shadow-green-600/20 flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-paper-plane"></i>
+                        <span>Pindahkan Bot Terpilih</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- BOTS TABLE LIST WITH MULTI-CHECK -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs text-gray-300">
+                    <thead class="bg-[#181e2b] text-gray-400 border-b border-gray-800 uppercase font-semibold">
+                        <tr>
+                            <th class="p-3 text-center w-10">
+                                <input type="checkbox" id="select-all-bots" onclick="toggleSelectAll(this)" class="rounded border-gray-700 bg-gray-900 text-indigo-600 focus:ring-0 w-4 h-4 cursor-pointer">
+                            </th>
+                            <th class="p-3">Bot ID / Identifier</th>
+                            <th class="p-3">Streamer Saat Ini</th>
+                            <th class="p-3">Status</th>
+                            <th class="p-3">Terakhir Aktif</th>
+                            <th class="p-3 text-center">Aksi Cepat</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bot-table-body" class="divide-y divide-gray-800/60">
+                        <!-- Demo Row 1 -->
+                        <tr class="hover:bg-[#181e2b]/50 transition">
+                            <td class="p-3 text-center">
+                                <input type="checkbox" value="Bot_RDP_01" class="bot-checkbox rounded border-gray-700 bg-gray-900 text-indigo-600 focus:ring-0 w-4 h-4 cursor-pointer">
+                            </td>
+                            <td class="p-3 font-semibold text-white flex items-center space-x-2">
+                                <i class="fa-solid fa-desktop text-gray-500"></i>
+                                <span>Bot_RDP_01</span>
+                            </td>
+                            <td class="p-3 text-indigo-300 font-mono">hstikkytokky</td>
+                            <td class="p-3">
+                                <span class="bg-green-900/40 text-green-400 border border-green-700/50 px-2.5 py-0.5 rounded-full text-[10px] font-bold">● Watching</span>
+                            </td>
+                            <td class="p-3 text-gray-500">10 Detik Lalu</td>
+                            <td class="p-3 text-center">
+                                <button onclick="quickMoveSingle('Bot_RDP_01')" class="text-indigo-400 hover:text-indigo-300 underline font-semibold">Pindah</button>
+                            </td>
+                        </tr>
+
+                        <!-- Demo Row 2 -->
+                        <tr class="hover:bg-[#181e2b]/50 transition">
+                            <td class="p-3 text-center">
+                                <input type="checkbox" value="Bot_RDP_02" class="bot-checkbox rounded border-gray-700 bg-gray-900 text-indigo-600 focus:ring-0 w-4 h-4 cursor-pointer">
+                            </td>
+                            <td class="p-3 font-semibold text-white flex items-center space-x-2">
+                                <i class="fa-solid fa-desktop text-gray-500"></i>
+                                <span>Bot_RDP_02</span>
+                            </td>
+                            <td class="p-3 text-indigo-300 font-mono">schneckyrii</td>
+                            <td class="p-3">
+                                <span class="bg-green-900/40 text-green-400 border border-green-700/50 px-2.5 py-0.5 rounded-full text-[10px] font-bold">● Watching</span>
+                            </td>
+                            <td class="p-3 text-gray-500">2 Detik Lalu</td>
+                            <td class="p-3 text-center">
+                                <button onclick="quickMoveSingle('Bot_RDP_02')" class="text-indigo-400 hover:text-indigo-300 underline font-semibold">Pindah</button>
+                            </td>
+                        </tr>
+
+                        <!-- Demo Row 3 -->
+                        <tr class="hover:bg-[#181e2b]/50 transition">
+                            <td class="p-3 text-center">
+                                <input type="checkbox" value="Bot_RDP_03" class="bot-checkbox rounded border-gray-700 bg-gray-900 text-indigo-600 focus:ring-0 w-4 h-4 cursor-pointer">
+                            </td>
+                            <td class="p-3 font-semibold text-white flex items-center space-x-2">
+                                <i class="fa-solid fa-desktop text-gray-500"></i>
+                                <span>Bot_RDP_03</span>
+                            </td>
+                            <td class="p-3 text-indigo-300 font-mono">cdmatthews</td>
+                            <td class="p-3">
+                                <span class="bg-amber-900/40 text-amber-400 border border-amber-700/50 px-2.5 py-0.5 rounded-full text-[10px] font-bold">● Idle / Claiming</span>
+                            </td>
+                            <td class="p-3 text-gray-500">1 Menit Lalu</td>
+                            <td class="p-3 text-center">
+                                <button onclick="quickMoveSingle('Bot_RDP_03')" class="text-indigo-400 hover:text-indigo-300 underline font-semibold">Pindah</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        function toggleSelectAll(source) {
+            checkboxes = document.getElementsByClassName('bot-checkbox');
+            for(var i=0, n=checkboxes.length;i<n;i++) {
+                checkboxes[i].checked = source.checked;
+            }
+        }
+
+        function syncStreamerInput(val) {
+            if(val) {
+                document.getElementById('target-streamer-input').value = val;
+            }
+        }
+
+        function executeMultiSwitch() {
+            const selectedBots = [];
+            document.querySelectorAll('.bot-checkbox:checked').forEach(cb => {
+                selectedBots.push(cb.value);
+            });
+
+            const targetStreamer = document.getElementById('target-streamer-input').value.trim();
+
+            if (selectedBots.length === 0) {
+                alert('⚠️ Silakan pilih/centang minimal 1 bot terlebih dahulu!');
+                return;
+            }
+
+            if (!targetStreamer) {
+                alert('⚠️ Silakan pilih dari dropdown atau ketik nama streamer tujuan!');
+                return;
+            }
+
+            alert(`🚀 PERINTAH DIKIRIM!\n\nMemindahkan ${selectedBots.length} Bot (${selectedBots.join(', ')}) ke Streamer: [ ${targetStreamer} ]`);
+            // Nanti di sini kita hubungkan ke WebSocket command FastAPI!
+        }
+
+        function quickMoveSingle(botId) {
+            const targetStreamer = document.getElementById('target-streamer-input').value.trim();
+            if(!targetStreamer) {
+                alert('⚠️ Ketik atau pilih nama streamer tujuan di kotak atas dulu, bro!');
+                return;
+            }
+            alert(`🚀 PERINTAH DIKIRIM!\n\nMemindahkan ${botId} ke Streamer: [ ${targetStreamer} ]`);
+        }
+    </script>
+</body>
+</html>

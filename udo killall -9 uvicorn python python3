@@ -1,0 +1,6 @@
+● kickbot.service - KickBot Tracker FastAPI Service
+     Loaded: loaded (/etc/systemd/system/kickbot.service; enabled; vendor preset: enabled)
+     Active: activating (auto-restart) (Result: exit-code) since Sun 2026-08-02 12:13:38 UTC; 3s ago
+    Process: 25735 ExecStart=/root/kick-bot-nerv/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 [0;1;31m(code=exited, status=3)[0m
+   Main PID: 25735 (code=exited, status=3)
+        CPU: 516ms
