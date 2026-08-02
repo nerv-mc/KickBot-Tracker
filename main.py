@@ -268,6 +268,10 @@ def get_live_data():
         LIMIT 10
     """)
     rows = cursor.fetchall()
+    
+    # Ambil juga data drops mentah terbaru untuk sinkronisasi Tampermonkey
+    cursor.execute("SELECT streamer, value, timestamp FROM drops ORDER BY id DESC LIMIT 5")
+    raw_drops = [{"streamer": r[0], "value": r[1], "timestamp": r[2]} for r in cursor.fetchall()]
     conn.close()
 
     top_drops_streamers = []
@@ -280,7 +284,6 @@ def get_live_data():
 
     global LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
     active_alert = LATEST_ALERT_DROP
-    # Batas durasi alert 2 menit (120 detik)
     if active_alert and (time.time() - LAST_DROP_TIMESTAMP > 120):
         active_alert = None
 
@@ -289,6 +292,8 @@ def get_live_data():
         "rankings": LIVE_RANKING_DATA,
         "offline": OFFLINE_RANKING_DATA,
         "top_drops": top_drops_streamers,
+        "drops": raw_drops,          # Tambahan agar kedeteksi script Tampermonkey v13.5
+        "alert_drop": active_alert,  # Tambahan agar kedeteksi script Tampermonkey v13.5
         "latest_alert": active_alert
     }
 
