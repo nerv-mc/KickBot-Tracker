@@ -4,11 +4,14 @@ import base64
 import asyncio
 import sqlite3
 import httpx
+import secrets
+import string
 from datetime import datetime, timedelta, timezone
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse, Response
+from typing import Set, Dict, List
 from get_script import SCRIPT_CONTENT
 
 app = FastAPI(title="KickBot Tracker API")
@@ -26,6 +29,7 @@ app.add_middleware(
 # ---------------------------------------------------------
 TELEGRAM_BOT_TOKEN = "7993820592:AAEY5ekIXdi0AyCCCNUZhQpLrV1quFmAX54"
 TELEGRAM_CHAT_ID = "@kickbot_tracker"
+KEYWORD_FILTER = ['slot', 'casino', 'stake', 'bonus']
 
 async def send_telegram_alert(streamer: str, value: str):
     if not TELEGRAM_BOT_TOKEN or "GANTI_TOKEN" in TELEGRAM_BOT_TOKEN:
@@ -82,6 +86,14 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS licenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            license_key TEXT UNIQUE,
+            expiry_date TEXT,
+            status TEXT DEFAULT 'active'
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -96,6 +108,41 @@ def save_drop_to_db(streamer: str, code: str, value: str = "N/A", claimed_by: st
     )
     conn.commit()
     conn.close()
+
+def get_license_expiry(license_key: str) -> str:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT expiry_date FROM licenses WHERE license_key = ?", (license_key,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return row[0]
+    # Default expiry jika license key hardcoded/belum terdaftar di DB (misal 30 hari ke depan)
+    default_expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    return default_expiry
+
+def generate_vip_license(days_valid: int = 30) -> tuple:
+    alphabet = string.ascii_uppercase + string.digits
+    chunk1 = "".join(secrets.choice(alphabet) for _ in range(4))
+    chunk2 = "".join(secrets.choice(alphabet) for _ in range(4))
+    license_key = f"VIP-KICK-{chunk1}-{chunk2}"
+    
+    expiry_date = datetime.now() + timedelta(days=days_valid)
+    expiry_str = expiry_date.strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO licenses (license_key, expiry_date, status) VALUES (?, ?, ?)",
+            (license_key, expiry_str, 'active')
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error saving license: {e}")
+        
+    return license_key, expiry_str
 
 async def sync_to_spreadsheet_backup(streamer: str, value: str):
     if not SPREADSHEET_WEBHOOK_URL:
@@ -141,6 +188,7 @@ LIVE_RANKING_DATA = []
 OFFLINE_RANKING_DATA = []
 LATEST_ALERT_DROP = None
 LAST_DROP_TIMESTAMP = 0
+seen_campaign_ids: Set[str] = set()
 
 KICK_HEADERS = {
     "Authorization": f"Bearer {ACCESS_TOKEN}",
@@ -148,17 +196,30 @@ KICK_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 }
 
+def is_slots_casino_campaign(camp: dict) -> bool:
+    name = camp.get('name', '')
+    cat_obj = camp.get('category', {})
+    cat_name = cat_obj.get('name', '') if isinstance(cat_obj, dict) else ''
+    cat_slug = cat_obj.get('slug', '') if isinstance(cat_obj, dict) else ''
+    text = f"{name} {cat_name} {cat_slug}".lower()
+    return any(k in text for k in KEYWORD_FILTER)
+
 # ---------------------------------------------------------
-# 3. BACKGROUND TASK: FETCH DIRECT TO KICK API V2
+# 3. BACKGROUND TASK: FETCH DIRECT KICK API V2 & CAMPAIGNS
 # ---------------------------------------------------------
 async def fetch_kick_official_api_loop():
-    global LIVE_RANKING_DATA, OFFLINE_RANKING_DATA, known_channels
+    global LIVE_RANKING_DATA, OFFLINE_RANKING_DATA, known_channels, LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
     while True:
         try:
-            url = f"https://api.kick.com/public/v2/livestreams?category_id={CATEGORY_ID}&limit={LIMIT_LIVE}"
-            async with httpx.AsyncClient(headers=KICK_HEADERS, timeout=15.0, follow_redirects=True) as client:
-                res = await client.get(url)
+            # 1. Fetch Livestreams Ranking
+            url_live = f"https://api.kick.com/public/v2/livestreams?category_id={CATEGORY_ID}&limit={LIMIT_LIVE}"
+            
+            # 2. Fetch Drops Campaigns
+            url_campaigns = "https://web.kick.com/api/v1/drops/campaigns"
 
+            async with httpx.AsyncClient(headers=KICK_HEADERS, timeout=15.0, follow_redirects=True) as client:
+                # --- PROCESS LIVE STREAMS ---
+                res = await client.get(url_live)
                 if res.status_code == 200:
                     json_data = res.json()
                     data = json_data.get("data", [])
@@ -216,6 +277,48 @@ async def fetch_kick_official_api_loop():
                     LIVE_RANKING_DATA = live_list
                     OFFLINE_RANKING_DATA = offline_list[:50]
 
+                # --- PROCESS DROPS CAMPAIGNS ---
+                res_camp = await client.get(url_campaigns)
+                if res_camp.status_code == 200:
+                    camp_data = res_camp.json()
+                    campaigns = camp_data.get("data", []) if isinstance(camp_data, dict) else camp_data
+                    
+                    for camp in campaigns:
+                        camp_id = str(camp.get("id") or camp.get("campaign_id", ""))
+                        if not camp_id or camp_id in seen_campaign_ids:
+                            continue
+
+                        if not is_slots_casino_campaign(camp):
+                            continue
+
+                        seen_campaign_ids.add(camp_id)
+
+                        channels = camp.get("channels", []) or camp.get("streamers", [])
+                        target_streamer = "kickstreamer"
+                        if channels and isinstance(channels, list):
+                            live_ch = next((c for c in channels if isinstance(c, dict) and (c.get("is_live") or c.get("livestream"))), None)
+                            ch = live_ch or channels[0]
+                            if isinstance(ch, dict):
+                                target_streamer = ch.get("slug") or ch.get("username") or ch.get("channel", {}).get("slug") or "kickstreamer"
+                            elif isinstance(ch, str):
+                                target_streamer = ch
+
+                        s_lower = str(target_streamer).lower()
+                        camp_name = camp.get("name") or camp.get("title") or "Kick Drop Bonus"
+
+                        # Save to database & trigger alerts
+                        save_drop_to_db(s_lower, "KICK-DROP", camp_name, "System")
+                        asyncio.create_task(sync_to_spreadsheet_backup(s_lower, camp_name))
+                        asyncio.create_task(send_telegram_alert(s_lower, camp_name))
+
+                        LATEST_ALERT_DROP = {
+                            "id": int(time.time() * 1000),
+                            "streamer": s_lower,
+                            "value": camp_name,
+                            "timestamp": int(time.time())
+                        }
+                        LAST_DROP_TIMESTAMP = time.time()
+
         except Exception:
             pass
 
@@ -226,17 +329,30 @@ async def startup_event():
     asyncio.create_task(fetch_kick_official_api_loop())
 
 # ---------------------------------------------------------
-# 4. ENDPOINTS UNTUK RECORD DROPS & TELEGRAM BROADCAST
+# 4. ADMIN & RECORD DROPS ENDPOINTS
 # ---------------------------------------------------------
+@app.get("/admin/generate-key")
+async def api_generate_key(days: int = 30, secret_admin_code: str = ""):
+    if secret_admin_code != "RAHASIA_ADMIN_LU":
+        return {"status": "error", "message": "Unauthorized"}
+    
+    key, expiry = generate_vip_license(days)
+    return {
+        "status": "success",
+        "license_key": key,
+        "expires_at": expiry,
+        "duration_days": days
+    }
+
 @app.post("/api/v1/record-drop")
 async def record_drop(request: Request):
     global LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
     try:
         body = await request.json()
         streamer = body.get("streamer")
-        value = body.get("value")
+        value = body.get("value", "KICK-DROP")
 
-        if not streamer or not value or streamer == "Unknown Streamer":
+        if not streamer or streamer == "Unknown Streamer":
             return {"status": "ignored", "message": "Invalid or empty drop payload."}
 
         save_drop_to_db(streamer, "KICK-DROP", value, "System")
@@ -532,7 +648,7 @@ def home_dashboard(request: Request):
     return HTMLResponse(content=html_content)
 
 # ---------------------------------------------------------
-# 6. PANEL VIP
+# 6. PANEL VIP DENGAN COUNTDOWN TIMERT LIVE
 # ---------------------------------------------------------
 @app.get("/panel", response_class=HTMLResponse)
 def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
@@ -540,6 +656,9 @@ def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
     raw_target_url = f"{base_url}/api/v1/get-script?license={license}"
     encrypted_payload = encrypt_text(raw_target_url)
     secure_tampermonkey_url = f"{base_url}/api/v1/load-secure-script?data={encrypted_payload}"
+    
+    # Ambil tanggal kedaluwarsa dari database atau default
+    expiry_str = get_license_expiry(license)
 
     html_content = f"""
     <!DOCTYPE html>
@@ -555,6 +674,7 @@ def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
             .card {{ background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }}
             .card-title {{ font-size: 1.1rem; font-weight: 600; color: #38bdf8; margin-top: 0; display: flex; align-items: center; gap: 8px; }}
             .input-box {{ width: 100%; padding: 12px; background: #080d1a; border: 1px solid #1e293b; color: #4ade80; font-family: 'Fira Code', monospace; border-radius: 6px; font-size: 13px; box-sizing: border-box; margin-top: 8px; }}
+            .grid-license {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }}
         </style>
     </head>
     <body>
@@ -567,12 +687,60 @@ def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
                 <a href="/" class="btn-back">&larr; Kembali ke Dashboard</a>
             </div>
 
+            <div class="grid-license">
+                <div class="card">
+                    <div class="card-title">📌 Status Lisensi VIP:</div>
+                    <p id="vip-status" class="text-sm font-bold text-green-400" style="color: #4ade80; font-weight: bold; font-size: 1.1rem; margin: 8px 0;">ACTIVE</p>
+                    <div style="font-size: 12px; color: #64748b;">Berlaku Sampai: {expiry_str} WIB</div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">⏳ Hitung Mundur Kedaluwarsa:</div>
+                    <div id="countdown-timer" style="font-family: monospace; font-size: 1.2rem; font-weight: bold; color: #38bdf8; margin-top: 10px;">
+                        Menghitung...
+                    </div>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-title">📌 Tampermonkey Userscript Loader URL:</div>
                 <input type="text" class="input-box" value="{secure_tampermonkey_url}" readonly onclick="this.select();">
                 <div style="font-size: 12px; color: #64748b; margin-top: 8px;">*URL di atas sudah terenkripsi URL-Safe dan menggunakan HTTPS domain utama.</div>
             </div>
         </div>
+
+        <script>
+            var expiryDateString = "{expiry_str}";
+            var expiryTime = new Date(expiryDateString.replace(' ', 'T')).getTime();
+
+            function updateCountdown() {
+                var now = new Date().getTime();
+                var distance = expiryTime - now;
+                var timerElement = document.getElementById("countdown-timer");
+
+                if (distance < 0) {
+                    timerElement.innerHTML = "EXPIRED (Lisensi Habis)";
+                    timerElement.style.color = "#ef4444";
+                    document.getElementById("vip-status").innerText = "INACTIVE";
+                    document.getElementById("vip-status").style.color = "#ef4444";
+                    return;
+                }
+
+                var days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                var hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                var seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                timerElement.innerHTML = days + " Hari " + hours + " Jam " + minutes + " Menit " + seconds + " Detik";
+            }
+
+            if (!isNaN(expiryTime)) {
+                setInterval(updateCountdown, 1000);
+                updateCountdown();
+            } else {
+                document.getElementById("countdown-timer").innerHTML = "Format waktu tidak valid";
+            }
+        </script>
     </body>
     </html>
     """
