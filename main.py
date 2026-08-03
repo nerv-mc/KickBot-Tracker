@@ -132,7 +132,7 @@ def get_clean_base_url(request: Request) -> str:
     host = request.headers.get("host", "kickbot-tracker.online")
     return f"https://{host}"
 
-ACCESS_TOKEN = "MWI5ZDI4NDMTNDNJMI0ZY2FILTHHODUTMZRMZJQ5NTRIOGVK"
+ACCESS_TOKEN = "MDZLYJG5ZJETN2JKZS0ZMGRKLWFIMTCTYMJJZWE3ZGFJZJE2"
 CATEGORY_ID = 28
 LIMIT_LIVE = 1000
 
