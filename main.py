@@ -680,21 +680,21 @@ def vip_panel(request: Request, license: str = ""):
     encrypted_payload = encrypt_text(raw_target_url)
     secure_tampermonkey_url = f"{base_url}/api/v1/load-secure-script?data={encrypted_payload}"
 
-    html_content = f"""
+    html_content = """
     <!DOCTYPE html>
     <html lang="id">
     <head>
         <meta charset="UTF-8">
         <title>Panel Manajemen Bot VIP</title>
         <style>
-            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 2rem; }}
-            .container {{ max-width: 1100px; margin: 0 auto; }}
-            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }}
-            .btn-back {{ background: #1e293b; color: #94a3b8; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; border: 1px solid #334155; }}
-            .card {{ background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }}
-            .card-title {{ font-size: 1.1rem; font-weight: 600; color: #38bdf8; margin-top: 0; display: flex; align-items: center; gap: 8px; }}
-            .input-box {{ width: 100%; padding: 12px; background: #080d1a; border: 1px solid #1e293b; color: #4ade80; font-family: 'Fira Code', monospace; border-radius: 6px; font-size: 13px; box-sizing: border-box; margin-top: 8px; }}
-            .grid-license {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }}
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 2rem; }
+            .container { max-width: 1100px; margin: 0 auto; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+            .btn-back { background: #1e293b; color: #94a3b8; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; border: 1px solid #334155; }
+            .card { background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }
+            .card-title { font-size: 1.1rem; font-weight: 600; color: #38bdf8; margin-top: 0; display: flex; align-items: center; gap: 8px; }
+            .input-box { width: 100%; padding: 12px; background: #080d1a; border: 1px solid #1e293b; color: #4ade80; font-family: 'Fira Code', monospace; border-radius: 6px; font-size: 13px; box-sizing: border-box; margin-top: 8px; }
+            .grid-license { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
         </style>
     </head>
     <body>
@@ -702,7 +702,7 @@ def vip_panel(request: Request, license: str = ""):
             <div class="header">
                 <div>
                     <h2 style="margin:0;">⚙️ Panel Manajemen Bot VIP</h2>
-                    <span style="font-size: 13px; color: #64748b;">Pemilik Lisensi: <b style="color:#4ade80;">Master User ({license})</b></span>
+                    <span style="font-size: 13px; color: #64748b;">Pemilik Lisensi: <b style="color:#4ade80;">LICENSE_PLACEHOLDER</b></span>
                 </div>
                 <a href="/" class="btn-back">&larr; Kembali ke Dashboard</a>
             </div>
@@ -711,7 +711,7 @@ def vip_panel(request: Request, license: str = ""):
                 <div class="card">
                     <div class="card-title">📌 Status Lisensi VIP:</div>
                     <p id="vip-status" style="color: #4ade80; font-weight: bold; font-size: 1.1rem; margin: 8px 0;">ACTIVE</p>
-                    <div style="font-size: 12px; color: #64748b;">Berlaku Sampai: {expiry_str} WIB</div>
+                    <div style="font-size: 12px; color: #64748b;">Berlaku Sampai: EXPIRY_PLACEHOLDER WIB</div>
                 </div>
 
                 <div class="card">
@@ -724,13 +724,13 @@ def vip_panel(request: Request, license: str = ""):
 
             <div class="card">
                 <div class="card-title">📌 Tampermonkey Userscript Loader URL:</div>
-                <input type="text" class="input-box" value="{secure_tampermonkey_url}" readonly onclick="this.select();">
+                <input type="text" class="input-box" value="SECURE_URL_PLACEHOLDER" readonly onclick="this.select();">
                 <div style="font-size: 12px; color: #64748b; margin-top: 8px;">*URL di atas sudah terenkripsi URL-Safe dan menggunakan HTTPS domain utama.</div>
             </div>
         </div>
 
         <script>
-            var expiryDateString = "{expiry_str}";
+            var expiryDateString = "EXPIRY_STRING_VALUE";
             var expiryTime = new Date(expiryDateString.replace(' ', 'T')).getTime();
 
             function updateCountdown() {
@@ -764,8 +764,13 @@ def vip_panel(request: Request, license: str = ""):
     </body>
     </html>
     """
-    return HTMLResponse(content=html_content)
+    
+    html_content = html_content.replace("SECURE_URL_PLACEHOLDER", secure_tampermonkey_url)
+    html_content = html_content.replace("EXPIRY_PLACEHOLDER", expiry_str)
+    html_content = html_content.replace("EXPIRY_STRING_VALUE", expiry_str)
+    html_content = html_content.replace("LICENSE_PLACEHOLDER", f"Master User ({license})")
 
+    return HTMLResponse(content=html_content)
 @app.get("/api/v1/load-secure-script", response_class=PlainTextResponse)
 def load_secure_script(data: str):
     try:
