@@ -333,7 +333,7 @@ async def startup_event():
 # ---------------------------------------------------------
 @app.get("/admin/generate-key")
 async def api_generate_key(days: int = 30, secret_admin_code: str = ""):
-    if secret_admin_code != "RAHASIA_ADMIN_LU":
+    if secret_admin_code != "yaudahadmin":
         return {"status": "error", "message": "Unauthorized"}
     
     key, expiry = generate_vip_license(days)
