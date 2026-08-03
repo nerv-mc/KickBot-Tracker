@@ -28,6 +28,7 @@ app.add_middleware(
 TELEGRAM_BOT_TOKEN = "7993820592:AAEY5ekIXdi0AyCCCNUZhQpLrV1quFmAX54"
 TELEGRAM_CHAT_ID = "@kickbot_tracker"
 WIB_TZ = ZoneInfo("Asia/Jakarta")
+seen_campaign_ids = set()
 
 async def send_telegram_alert(streamer: str, value: str):
     if not TELEGRAM_BOT_TOKEN or "GANTI_TOKEN" in TELEGRAM_BOT_TOKEN:
@@ -163,34 +164,28 @@ def is_slots_casino_campaign(camp: dict) -> bool:
 # 3. BACKGROUND TASK: FETCH DIRECT TO KICK API & CAMPAIGNS
 # ---------------------------------------------------------
 async def fetch_kick_official_api_loop():
-    global LIVE_RANKING_DATA, OFFLINE_RANKING_DATA, known_channels, LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
+    global LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
     while True:
         try:
             endpoints = [
                 "https://web.kick.com/api/v1/drops/campaigns",
-                "https://kick.com/api/v2/channels/drops/campaigns",
                 "https://kick.com/api/v1/drops/campaigns"
             ]
             
             headers_camp = {
                 "Accept": "application/json, text/plain, */*",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-                "Referer": "https://kick.com/drops/all-campaigns",
-                "Origin": "https://kick.com",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Authorization": f"Bearer {KICK_ACCESS_TOKEN}"
             }
             
             campaigns = []
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client_camp:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                 for url_target in endpoints:
                     try:
-                        res_camp = await client_camp.get(url_target, headers=headers_camp)
-                        if res_camp.status_code == 200:
-                            resp_json = res_camp.json()
-                            if isinstance(resp_json, list):
-                                campaigns = resp_json
-                            elif isinstance(resp_json, dict):
-                                campaigns = resp_json.get("data", resp_json.get("campaigns", []))
+                        res = await client.get(url_target, headers=headers_camp)
+                        if res.status_code == 200:
+                            data = res.json()
+                            campaigns = data if isinstance(data, list) else data.get("data", data.get("campaigns", []))
                             if campaigns:
                                 break
                     except Exception:
@@ -199,53 +194,29 @@ async def fetch_kick_official_api_loop():
             for camp in campaigns:
                 if not isinstance(camp, dict):
                     continue
-                
                 camp_id = str(camp.get("id") or camp.get("campaign_id", ""))
                 if not camp_id or camp_id in seen_campaign_ids:
                     continue
+                seen_campaign_ids.add(camp_id)
 
                 camp_name = camp.get("name") or camp.get("title") or "Kick Drop Bonus"
-                text_check = f"{camp_name} {camp.get('category', {}).get('name', '')}".lower()
-                
-                keywords = ['slot', 'casino', 'stake', 'bonus']
-                if not any(k in text_check for k in keywords):
-                    pass
-
-                seen_campaign_ids.add(camp_id)
-                
-                channels = camp.get("channels", []) or camp.get("streamers", []) or camp.get("participants", [])
+                channels = camp.get("channels", []) or camp.get("streamers", [])
                 target_streamer = "kickstreamer"
                 
                 if channels and isinstance(channels, list):
-                    live_ch = next((c for c in channels if isinstance(c, dict) and (c.get("is_live") or c.get("livestream"))), None)
-                    ch = live_ch or channels[0]
+                    ch = channels[0]
                     if isinstance(ch, dict):
-                        target_streamer = (
-                            ch.get("slug") or 
-                            ch.get("username") or 
-                            ch.get("channel", {}).get("slug") or 
-                            (ch.get("user", {}).get("username") if isinstance(ch.get("user"), dict) else None) or
-                            "kickstreamer"
-                        )
-                    elif isinstance(ch, str):
-                        target_streamer = ch
+                        target_streamer = ch.get("slug") or ch.get("username") or "kickstreamer"
 
                 s_lower = str(target_streamer).lower()
-
+                
+                # Masukin langsung ke fungsi database asli lu
                 save_drop_to_db(s_lower, "KICK-DROP", camp_name, "System", "System")
                 asyncio.create_task(sync_to_spreadsheet_backup(s_lower, camp_name))
                 asyncio.create_task(send_telegram_alert(s_lower, camp_name))
 
-                LATEST_ALERT_DROP = {
-                    "id": int(time.time() * 1000),
-                    "streamer": s_lower,
-                    "value": camp_name,
-                    "timestamp": int(time.time())
-                }
-                LAST_DROP_TIMESTAMP = time.time()
-
         except Exception as e:
-            print(f"Error loop fetch kick drops: {e}")
+            print(f"Error: {e}")
 
         await asyncio.sleep(10)
 
