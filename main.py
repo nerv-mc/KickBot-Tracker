@@ -76,7 +76,7 @@ DB_PATH = "/root/kick-bot-nerv/kick_drops.db"
 SPREADSHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz9yDIiHhBlRXfjwsVcmaEHbS_8wvucVR46XmBttCZV0BRqWR7CmmweFM_jRIi_PH76uA/exec"
 
 # Spreadsheet 2: Khusus log License Key (Nama | License | Created Time | Expired Time)
-LICENSE_SPREADSHEET_WEBHOOK_URL = "GANTI_URL_WEBAPP_SPREADSHEET_LISENSI_BARU_DISINI"
+LICENSE_SPREADSHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz9yDIiHhBlRXfjwsVcmaEHbS_8wvucVR46XmBttCZV0BRqWR7CmmweFM_jRIi_PH76uA/exec" # Ganti URL Web App Spreadsheet Lisensi lu di sini
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -96,7 +96,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             license_key TEXT UNIQUE,
             expiry_date TEXT,
-            status TEXT DEFAULT 'active'
+            status TEXT DEFAULT 'active',
+            device_id TEXT DEFAULT NULL
         )
     """)
     conn.commit()
@@ -127,8 +128,8 @@ def generate_vip_license(days_valid: int = 30, buyer: str = "General Buyer") -> 
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO licenses (license_key, expiry_date, status) VALUES (?, ?, ?)",
-            (license_key, expiry_str, 'active')
+            "INSERT INTO licenses (license_key, expiry_date, status, device_id) VALUES (?, ?, ?, ?)",
+            (license_key, expiry_str, 'active', None)
         )
         conn.commit()
         conn.close()
@@ -544,7 +545,13 @@ def home_dashboard(request: Request):
             function submitLicense() {
                 const license = document.getElementById('licenseInput').value.trim();
                 if(license) {
-                    window.location.href = '/panel?license=' + encodeURIComponent(license);
+                    // Generate unique device token/ID local browser untuk device lock
+                    let deviceId = localStorage.getItem('kick_dev_id');
+                    if(!deviceId) {
+                        deviceId = 'dev_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+                        localStorage.setItem('kick_dev_id', deviceId);
+                    }
+                    window.location.href = '/panel?license=' + encodeURIComponent(license) + '&devid=' + deviceId;
                 }
             }
 
@@ -656,17 +663,20 @@ def home_dashboard(request: Request):
     return HTMLResponse(content=html_content)
 
 # ---------------------------------------------------------
-# 6. PANEL VIP DENGAN VALIDASI DATABASE & COUNTDOWN
+# 6. PANEL VIP DENGAN VALIDASI DATABASE & DEVICE LOCK
 # ---------------------------------------------------------
 @app.get("/panel", response_class=HTMLResponse)
-def vip_panel(request: Request, license: str = ""):
+def vip_panel(request: Request, license: str = "", devid: str = ""):
+    client_ip = request.client.host
+    current_device = devid if devid else client_ip
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT expiry_date FROM licenses WHERE license_key = ? AND status = 'active'", (license,))
+    cursor.execute("SELECT expiry_date, device_id FROM licenses WHERE license_key = ? AND status = 'active'", (license,))
     row = cursor.fetchone()
-    conn.close()
 
     if not row:
+        conn.close()
         return HTMLResponse(content="""
         <!DOCTYPE html>
         <html lang="id">
@@ -691,11 +701,44 @@ def vip_panel(request: Request, license: str = ""):
         </html>
         """, status_code=403)
 
-    expiry_str = row[0]
+    expiry_str, registered_device = row
+
+    # Validasi Device Lock
+    if not registered_device:
+        cursor.execute("UPDATE licenses SET device_id = ? WHERE license_key = ?", (current_device, license))
+        conn.commit()
+    elif registered_device != current_device:
+        conn.close()
+        return HTMLResponse(content=""""
+        <!DOCTYPE html>
+        <html lang="id">
+        <head>
+            <meta charset="UTF-8">
+            <title>Device Locked</title>
+            <style>
+                body { font-family: 'Segoe UI', sans-serif; background: #0b0f19; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .box { background: #111827; border: 1px solid #1e293b; padding: 2rem; border-radius: 12px; text-align: center; max-width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+                h2 { color: #f59e0b; margin-top: 0; }
+                p { color: #94a3b8; font-size: 14px; margin-bottom: 1.5rem; }
+                a { background: #6366f1; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px; }
+            </style>
+        </head>
+        <body>
+            <div class="box">
+                <h2>🔒 Perangkat Terkunci</h2>
+                <p>License key ini sudah terikat (locked) ke perangkat/browser lain dan tidak dapat digunakan di perangkat ini (1 License = 1 Device).</p>
+                <a href="/">&larr; Kembali ke Beranda</a>
+            </div>
+        </body>
+        </html>
+        """, status_code=403)
+
+    conn.close()
+
     base_url = get_clean_base_url(request)
     raw_target_url = f"{base_url}/api/v1/get-script?license={license}"
     encrypted_payload = encrypt_text(raw_target_url)
-    secure_tampermonkey_url = f"{base_url}/api/v1/load-secure-script?data={encrypted_payload}"
+    secure_tampermonkey_url = f"{base_url}/api/v1/load-secure-script?data={encrypted_payload}&devid={current_device}"
 
     html_content = """
     <!DOCTYPE html>
@@ -726,8 +769,8 @@ def vip_panel(request: Request, license: str = ""):
 
             <div class="grid-license">
                 <div class="card">
-                    <div class="card-title">📌 Status Lisensi VIP:</div>
-                    <p id="vip-status" style="color: #4ade80; font-weight: bold; font-size: 1.1rem; margin: 8px 0;">ACTIVE</p>
+                    <div class="card-title">📌 Status Lisensi VIP (Device Locked):</div>
+                    <p id="vip-status" style="color: #4ade80; font-weight: bold; font-size: 1.1rem; margin: 8px 0;">ACTIVE & LOCKED</p>
                     <div style="font-size: 12px; color: #64748b;">Berlaku Sampai: EXPIRY_PLACEHOLDER WIB</div>
                 </div>
 
@@ -742,7 +785,7 @@ def vip_panel(request: Request, license: str = ""):
             <div class="card">
                 <div class="card-title">📌 Tampermonkey Userscript Loader URL:</div>
                 <input type="text" class="input-box" value="SECURE_URL_PLACEHOLDER" readonly onclick="this.select();">
-                <div style="font-size: 12px; color: #64748b; margin-top: 8px;">*URL di atas sudah terenkripsi URL-Safe dan menggunakan HTTPS domain utama.</div>
+                <div style="font-size: 12px; color: #64748b; margin-top: 8px;">*URL di atas sudah terikat secara eksklusif ke perangkat browser Anda saat ini.</div>
             </div>
         </div>
 
@@ -785,25 +828,44 @@ def vip_panel(request: Request, license: str = ""):
     html_content = html_content.replace("SECURE_URL_PLACEHOLDER", secure_tampermonkey_url)
     html_content = html_content.replace("EXPIRY_PLACEHOLDER", expiry_str)
     html_content = html_content.replace("EXPIRY_STRING_VALUE", expiry_str)
-    html_content = html_content.replace("LICENSE_PLACEHOLDER", f"Master User ({license})")
+    html_content = html_content.replace("LICENSE_PLACEHOLDER", f"VIP User ({license})")
 
     return HTMLResponse(content=html_content)
 
 @app.get("/api/v1/load-secure-script", response_class=PlainTextResponse)
-def load_secure_script(data: str):
+def load_secure_script(request: Request, data: str, devid: str = ""):
     try:
         decrypted_url = decrypt_text(data)
         if "get-script?license=" in decrypted_url:
             license_key = decrypted_url.split("get-script?license=")[1].split("&")[0]
+            client_ip = request.client.host
+            current_device = devid if devid else client_ip
             
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT id FROM licenses WHERE license_key = ? AND status = 'active'", (license_key,))
+            cursor.execute("SELECT expiry_date, device_id FROM licenses WHERE license_key = ? AND status = 'active'", (license_key,))
             row = cursor.fetchone()
-            conn.close()
 
             if row:
+                expiry_str, registered_device = row
+                
+                # Cek Kedaluwarsa
+                expiry_time = datetime.strptime(expiry_str, "%Y-%m-%d %H:%M:%S").timestamp()
+                if datetime.now().timestamp() > expiry_time:
+                    conn.close()
+                    return PlainTextResponse(content="// Access Denied: License Key has expired.", media_type="text/javascript")
+
+                # Cek Device Lock
+                if not registered_device:
+                    cursor.execute("UPDATE licenses SET device_id = ? WHERE license_key = ?", (current_device, license_key))
+                    conn.commit()
+                elif registered_device != current_device:
+                    conn.close()
+                    return PlainTextResponse(content="// Access Denied: License Key is locked to another device.", media_type="text/javascript")
+
+                conn.close()
                 return PlainTextResponse(content=SCRIPT_CONTENT, media_type="text/javascript")
+            conn.close()
     except Exception:
         pass
     
