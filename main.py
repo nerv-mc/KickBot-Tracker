@@ -117,7 +117,6 @@ def get_license_expiry(license_key: str) -> str:
     conn.close()
     if row:
         return row[0]
-    # Default expiry jika license key hardcoded/belum terdaftar di DB (misal 30 hari ke depan)
     default_expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
     return default_expiry
 
@@ -211,14 +210,10 @@ async def fetch_kick_official_api_loop():
     global LIVE_RANKING_DATA, OFFLINE_RANKING_DATA, known_channels, LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
     while True:
         try:
-            # 1. Fetch Livestreams Ranking
             url_live = f"https://api.kick.com/public/v2/livestreams?category_id={CATEGORY_ID}&limit={LIMIT_LIVE}"
-            
-            # 2. Fetch Drops Campaigns
             url_campaigns = "https://web.kick.com/api/v1/drops/campaigns"
 
             async with httpx.AsyncClient(headers=KICK_HEADERS, timeout=15.0, follow_redirects=True) as client:
-                # --- PROCESS LIVE STREAMS ---
                 res = await client.get(url_live)
                 if res.status_code == 200:
                     json_data = res.json()
@@ -277,7 +272,6 @@ async def fetch_kick_official_api_loop():
                     LIVE_RANKING_DATA = live_list
                     OFFLINE_RANKING_DATA = offline_list[:50]
 
-                # --- PROCESS DROPS CAMPAIGNS ---
                 res_camp = await client.get(url_campaigns)
                 if res_camp.status_code == 200:
                     camp_data = res_camp.json()
@@ -306,7 +300,6 @@ async def fetch_kick_official_api_loop():
                         s_lower = str(target_streamer).lower()
                         camp_name = camp.get("name") or camp.get("title") or "Kick Drop Bonus"
 
-                        # Save to database & trigger alerts
                         save_drop_to_db(s_lower, "KICK-DROP", camp_name, "System")
                         asyncio.create_task(sync_to_spreadsheet_backup(s_lower, camp_name))
                         asyncio.create_task(send_telegram_alert(s_lower, camp_name))
@@ -452,7 +445,6 @@ def home_dashboard(request: Request):
             .hidden-tag { background: #f59e0b; color: #000; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-left: 6px; }
             .drop-badge { background: #8b5cf6; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: bold; }
 
-            /* Modal CSS */
             .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 1000; justify-content: center; align-items: center; }
             .modal-box { background: #111827; border: 1px solid #1e293b; border-radius: 12px; padding: 2rem; width: 100%; max-width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
             .modal-title { font-size: 1.1rem; font-weight: bold; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 8px; color: #f8fafc; }
@@ -510,12 +502,11 @@ def home_dashboard(request: Request):
             </div>
         </div>
 
-        <!-- Modal License Key -->
         <div class="modal-overlay" id="licenseModal">
             <div class="modal-box">
                 <div class="modal-title">🔑 Masukkan License Key</div>
                 <div class="modal-desc">Akses Panel Manajemen Bot khusus pengguna VIP yang memiliki lisensi aktif.</div>
-                <input type="text" id="licenseInput" class="modal-input" value="VIP-KICK-2026">
+                <input type="text" id="licenseInput" class="modal-input" placeholder="Masukkan License Key VIP...">
                 <div class="modal-buttons">
                     <button class="btn-secondary" onclick="closeModal()">Batal</button>
                     <button class="btn-primary" onclick="submitLicense()">Masuk Panel &rarr;</button>
@@ -648,32 +639,62 @@ def home_dashboard(request: Request):
     return HTMLResponse(content=html_content)
 
 # ---------------------------------------------------------
-# 6. PANEL VIP DENGAN COUNTDOWN TIMERT LIVE
+# 6. PANEL VIP DENGAN VALIDASI DATABASE & COUNTDOWN
 # ---------------------------------------------------------
 @app.get("/panel", response_class=HTMLResponse)
-def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
+def vip_panel(request: Request, license: str = ""):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT expiry_date FROM licenses WHERE license_key = ? AND status = 'active'", (license,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return HTMLResponse(content="""
+        <!DOCTYPE html>
+        <html lang="id">
+        <head>
+            <meta charset="UTF-8">
+            <title>Unauthorized License</title>
+            <style>
+                body { font-family: 'Segoe UI', sans-serif; background: #0b0f19; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .box { background: #111827; border: 1px solid #1e293b; padding: 2rem; border-radius: 12px; text-align: center; max-width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+                h2 { color: #ef4444; margin-top: 0; }
+                p { color: #94a3b8; font-size: 14px; margin-bottom: 1.5rem; }
+                a { background: #6366f1; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px; }
+            </style>
+        </head>
+        <body>
+            <div class="box">
+                <h2>⛔ Akses Ditolak</h2>
+                <p>License key yang Anda masukkan tidak valid, sudah kedaluwarsa, atau belum terdaftar di sistem.</p>
+                <a href="/">&larr; Kembali ke Beranda</a>
+            </div>
+        </body>
+        </html>
+        """, status_code=403)
+
+    expiry_str = row[0]
     base_url = get_clean_base_url(request)
     raw_target_url = f"{base_url}/api/v1/get-script?license={license}"
     encrypted_payload = encrypt_text(raw_target_url)
     secure_tampermonkey_url = f"{base_url}/api/v1/load-secure-script?data={encrypted_payload}"
-    
-    expiry_str = get_license_expiry(license)
 
-    html_content = """
+    html_content = f"""
     <!DOCTYPE html>
     <html lang="id">
     <head>
         <meta charset="UTF-8">
         <title>Panel Manajemen Bot VIP</title>
         <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 2rem; }
-            .container { max-width: 1100px; margin: 0 auto; }
-            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-            .btn-back { background: #1e293b; color: #94a3b8; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; border: 1px solid #334155; }
-            .card { background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }
-            .card-title { font-size: 1.1rem; font-weight: 600; color: #38bdf8; margin-top: 0; display: flex; align-items: center; gap: 8px; }
-            .input-box { width: 100%; padding: 12px; background: #080d1a; border: 1px solid #1e293b; color: #4ade80; font-family: 'Fira Code', monospace; border-radius: 6px; font-size: 13px; box-sizing: border-box; margin-top: 8px; }
-            .grid-license { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 2rem; }}
+            .container {{ max-width: 1100px; margin: 0 auto; }}
+            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }}
+            .btn-back {{ background: #1e293b; color: #94a3b8; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; border: 1px solid #334155; }}
+            .card {{ background: #111827; border: 1px solid #1e293b; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }}
+            .card-title {{ font-size: 1.1rem; font-weight: 600; color: #38bdf8; margin-top: 0; display: flex; align-items: center; gap: 8px; }}
+            .input-box {{ width: 100%; padding: 12px; background: #080d1a; border: 1px solid #1e293b; color: #4ade80; font-family: 'Fira Code', monospace; border-radius: 6px; font-size: 13px; box-sizing: border-box; margin-top: 8px; }}
+            .grid-license {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }}
         </style>
     </head>
     <body>
@@ -681,7 +702,7 @@ def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
             <div class="header">
                 <div>
                     <h2 style="margin:0;">⚙️ Panel Manajemen Bot VIP</h2>
-                    <span style="font-size: 13px; color: #64748b;">Pemilik Lisensi: <b style="color:#4ade80;">Master License</b></span>
+                    <span style="font-size: 13px; color: #64748b;">Pemilik Lisensi: <b style="color:#4ade80;">Master User ({license})</b></span>
                 </div>
                 <a href="/" class="btn-back">&larr; Kembali ke Dashboard</a>
             </div>
@@ -689,8 +710,8 @@ def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
             <div class="grid-license">
                 <div class="card">
                     <div class="card-title">📌 Status Lisensi VIP:</div>
-                    <p id="vip-status" class="text-sm font-bold text-green-400" style="color: #4ade80; font-weight: bold; font-size: 1.1rem; margin: 8px 0;">ACTIVE</p>
-                    <div style="font-size: 12px; color: #64748b;">Berlaku Sampai: EXPIRY_PLACEHOLDER WIB</div>
+                    <p id="vip-status" style="color: #4ade80; font-weight: bold; font-size: 1.1rem; margin: 8px 0;">ACTIVE</p>
+                    <div style="font-size: 12px; color: #64748b;">Berlaku Sampai: {expiry_str} WIB</div>
                 </div>
 
                 <div class="card">
@@ -703,13 +724,13 @@ def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
 
             <div class="card">
                 <div class="card-title">📌 Tampermonkey Userscript Loader URL:</div>
-                <input type="text" class="input-box" value="SECURE_URL_PLACEHOLDER" readonly onclick="this.select();">
+                <input type="text" class="input-box" value="{secure_tampermonkey_url}" readonly onclick="this.select();">
                 <div style="font-size: 12px; color: #64748b; margin-top: 8px;">*URL di atas sudah terenkripsi URL-Safe dan menggunakan HTTPS domain utama.</div>
             </div>
         </div>
 
         <script>
-            var expiryDateString = "EXPIRY_STRING_VALUE";
+            var expiryDateString = "{expiry_str}";
             var expiryTime = new Date(expiryDateString.replace(' ', 'T')).getTime();
 
             function updateCountdown() {
@@ -743,18 +764,27 @@ def vip_panel(request: Request, license: str = "VIP-KICK-2026"):
     </body>
     </html>
     """
-    
-    # Masukkan variabel secara aman pakai .replace agar tidak error kurung kurawal JS
-    html_content = html_content.replace("SECURE_URL_PLACEHOLDER", secure_tampermonkey_url)
-    html_content = html_content.replace("EXPIRY_PLACEHOLDER", expiry_str)
-    html_content = html_content.replace("EXPIRY_STRING_VALUE", expiry_str)
-    html_content = html_content.replace("Master License", f"Master User ({license})")
-
     return HTMLResponse(content=html_content)
 
 @app.get("/api/v1/load-secure-script", response_class=PlainTextResponse)
 def load_secure_script(data: str):
-    return PlainTextResponse(content="// KickBot Tracker Service Running Directly on VPS Server", media_type="text/javascript")
+    try:
+        decrypted_url = decrypt_text(data)
+        if "get-script?license=" in decrypted_url:
+            license_key = decrypted_url.split("get-script?license=")[1].split("&")[0]
+            
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM licenses WHERE license_key = ? AND status = 'active'", (license_key,))
+            row = cursor.fetchone()
+            conn.close()
+
+            if row:
+                return PlainTextResponse(content=SCRIPT_CONTENT, media_type="text/javascript")
+    except Exception:
+        pass
+    
+    return PlainTextResponse(content="// Access Denied: Invalid or Expired License Key", media_type="text/javascript")
 
 @app.get("/api/v1/get-script")
 def get_raw_script(license: str):
