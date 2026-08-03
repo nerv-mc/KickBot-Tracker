@@ -134,7 +134,11 @@ def decrypt_text(encrypted_text: str) -> str:
     decoded_bytes = base64.urlsafe_b64decode(encrypted_text.encode("utf-8"))
     return cipher.decrypt(decoded_bytes).decode("utf-8")
 
-KICK_ACCESS_TOKEN = "MWI5ZDI4NDMTNDNJMI0ZY2FILTHHODUTMZRZJQ5NTRIOGVK"
+def get_clean_base_url(request: Request) -> str:
+    host = request.headers.get("host", "kickbot-tracker.online")
+    return f"https://{host}"
+
+KICK_ACCESS_TOKEN = "MWI5ZDI4NDMTNDNJMI0ZY2FILTHHODUTMZRMZJQ5NTRIOGVK"
 CATEGORY_ID = 28
 LIMIT_LIVE = 1000
 
