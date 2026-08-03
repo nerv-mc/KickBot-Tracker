@@ -4,15 +4,12 @@ import base64
 import asyncio
 import sqlite3
 import httpx
-import requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse, Response
-from typing import Dict, List, Set
-from get_script import SCRIPT_CONTENT
+from typing import Set
 
 app = FastAPI(title="KickBot Tracker & Monitor API")
 
@@ -137,7 +134,7 @@ def get_clean_base_url(request: Request) -> str:
     host = request.headers.get("host", "kickbot-tracker.online")
     return f"https://{host}"
 
-ACCESS_TOKEN = "YJJHNZY3NJETNMU5MS0ZNDUXLWI3NDUTMZQZNDFMYJFLMZVI"
+KICK_ACCESS_TOKEN = "MWI5ZDI4NDMTNDNJMI0ZY2FILTHHODUTMZRMZJQ5NTRIOGVK"
 CATEGORY_ID = 28
 LIMIT_LIVE = 1000
 
@@ -147,48 +144,8 @@ OFFLINE_RANKING_DATA = []
 LATEST_ALERT_DROP = None
 LAST_DROP_TIMESTAMP = 0
 
-# Variabel tambahan dari py ke 2 untuk manajemen bot & campaign drops
-bot_assignments: Dict[str, dict] = {}
-daily_blacklisted_streamers: Dict[str, Set[str]] = {}
-blacklisted_pending_until: Dict[str, float] = {}
 seen_campaign_ids: Set[str] = set()
-
-ALL_REGISTERED_BOTS = [
-    "RestyFadilah12", "Asnbumai", "Inisaripudin", 
-    "Suraptbegg", "Distriyana", "Widiastusi1219"
-]
 KEYWORD_FILTER = ['slot', 'casino', 'stake', 'bonus']
-
-KICK_HEADERS = {
-    "Authorization": f"Bearer {ACCESS_TOKEN}",
-    "Accept": "application/json",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-}
-
-def get_today_wib_str() -> str:
-    return datetime.now(WIB_TZ).strftime("%Y-%m-%d")
-
-def add_to_daily_blacklist_with_delay(streamer: str, delay_minutes: int = 10):
-    s_lower = streamer.lower()
-    unlock_time = time.time() + (delay_minutes * 60)
-    blacklisted_pending_until[s_lower] = unlock_time
-
-def is_blacklisted_today(streamer: str) -> bool:
-    s_lower = streamer.lower()
-    today = get_today_wib_str()
-    if s_lower in daily_blacklisted_streamers.get(today, set()):
-        return True
-    if s_lower in blacklisted_pending_until:
-        unlock_time = blacklisted_pending_until[s_lower]
-        if time.time() >= unlock_time:
-            if today not in daily_blacklisted_streamers:
-                daily_blacklisted_streamers[today] = set()
-            daily_blacklisted_streamers[today].add(s_lower)
-            del blacklisted_pending_until[s_lower]
-            return True
-        else:
-            return False
-    return False
 
 def is_slots_casino_campaign(camp: dict) -> bool:
     name = camp.get('name', '')
@@ -205,112 +162,86 @@ async def fetch_kick_official_api_loop():
     global LIVE_RANKING_DATA, OFFLINE_RANKING_DATA, known_channels, LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
     while True:
         try:
-            # 1. Cek Kampanye Drop Real-Time (diadaptasi dari py ke 2)
-            url_camp = "https://web.kick.com/api/v1/drops/campaigns"
+            endpoints = [
+                "https://web.kick.com/api/v1/drops/campaigns",
+                "https://kick.com/api/v2/channels/drops/campaigns",
+                "https://kick.com/api/v1/drops/campaigns"
+            ]
+            
             headers_camp = {
-                "Accept": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "Accept": "application/json, text/plain, */*",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "Referer": "https://kick.com/drops/all-campaigns",
+                "Origin": "https://kick.com",
+                "Authorization": f"Bearer {KICK_ACCESS_TOKEN}"
             }
-            async with httpx.AsyncClient(timeout=10.0) as client_camp:
-                res_camp = await client_camp.get(url_camp, headers=headers_camp)
-                if res_camp.status_code == 200:
-                    campaigns = res_camp.json().get("data", [])
-                    for camp in campaigns:
-                        camp_id = str(camp.get("id"))
-                        if camp_id in seen_campaign_ids:
-                            continue
-                        if not is_slots_casino_campaign(camp):
-                            continue
+            
+            campaigns = []
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client_camp:
+                for url_target in endpoints:
+                    try:
+                        res_camp = await client_camp.get(url_target, headers=headers_camp)
+                        if res_camp.status_code == 200:
+                            resp_json = res_camp.json()
+                            if isinstance(resp_json, list):
+                                campaigns = resp_json
+                            elif isinstance(resp_json, dict):
+                                campaigns = resp_json.get("data", resp_json.get("campaigns", []))
+                            if campaigns:
+                                break
+                    except Exception:
+                        continue
 
-                        seen_campaign_ids.add(camp_id)
-                        channels = camp.get("channels", [])
-                        target_streamer = None
-                        if channels:
-                            live_ch = next((c for c in channels if c.get("is_live") or c.get("livestream")), None)
-                            ch = live_ch or channels[0]
-                            target_streamer = ch.get("slug") or ch.get("username") or (ch.get("user", {}).get("username") if isinstance(ch.get("user"), dict) else None)
+            for camp in campaigns:
+                if not isinstance(camp, dict):
+                    continue
+                
+                camp_id = str(camp.get("id") or camp.get("campaign_id", ""))
+                if not camp_id or camp_id in seen_campaign_ids:
+                    continue
 
-                        if target_streamer:
-                            s_lower = target_streamer.lower()
-                            camp_name = camp.get("name", "Slots Drop")
-                            add_to_daily_blacklist_with_delay(s_lower, delay_minutes=10)
+                camp_name = camp.get("name") or camp.get("title") or "Kick Drop Bonus"
+                text_check = f"{camp_name} {camp.get('category', {}).get('name', '')}".lower()
+                
+                keywords = ['slot', 'casino', 'stake', 'bonus']
+                if not any(k in text_check for k in keywords):
+                    pass
 
-                            save_drop_to_db(s_lower, "KICK-DROP", camp_name, "System")
-                            asyncio.create_task(sync_to_spreadsheet_backup(s_lower, camp_name))
-                            asyncio.create_task(send_telegram_alert(s_lower, camp_name))
+                seen_campaign_ids.add(camp_id)
+                
+                channels = camp.get("channels", []) or camp.get("streamers", []) or camp.get("participants", [])
+                target_streamer = "kickstreamer"
+                
+                if channels and isinstance(channels, list):
+                    live_ch = next((c for c in channels if isinstance(c, dict) and (c.get("is_live") or c.get("livestream"))), None)
+                    ch = live_ch or channels[0]
+                    if isinstance(ch, dict):
+                        target_streamer = (
+                            ch.get("slug") or 
+                            ch.get("username") or 
+                            ch.get("channel", {}).get("slug") or 
+                            (ch.get("user", {}).get("username") if isinstance(ch.get("user"), dict) else None) or
+                            "kickstreamer"
+                        )
+                    elif isinstance(ch, str):
+                        target_streamer = ch
 
-                            LATEST_ALERT_DROP = {
-                                "id": int(time.time() * 1000),
-                                "streamer": s_lower,
-                                "value": camp_name,
-                                "timestamp": int(time.time())
-                            }
-                            LAST_DROP_TIMESTAMP = time.time()
+                s_lower = str(target_streamer).lower()
 
-            # 2. Fetch Livestreams Ranking v2
-            url = f"https://api.kick.com/public/v2/livestreams?category_id={CATEGORY_ID}&limit={LIMIT_LIVE}"
-            async with httpx.AsyncClient(headers=KICK_HEADERS, timeout=15.0, follow_redirects=True) as client:
-                res = await client.get(url)
+                save_drop_to_db(s_lower, "KICK-DROP", camp_name, "System", "System")
+                asyncio.create_task(sync_to_spreadsheet_backup(s_lower, camp_name))
+                asyncio.create_task(send_telegram_alert(s_lower, camp_name))
 
-                if res.status_code == 200:
-                    json_data = res.json()
-                    data = json_data.get("data", [])
-                    now = int(time.time() * 1000)
-                    currently_live = set()
-                    live_list = []
+                LATEST_ALERT_DROP = {
+                    "id": int(time.time() * 1000),
+                    "streamer": s_lower,
+                    "value": camp_name,
+                    "timestamp": int(time.time())
+                }
+                LAST_DROP_TIMESTAMP = time.time()
 
-                    for s in data:
-                        channel_info = s.get("channel", {}) or {}
-                        broadcaster_info = s.get("broadcaster_user", {}) or {}
-                        channel = channel_info.get("slug") or broadcaster_info.get("username") or "unknown"
-
-                        raw_viewers = s.get("viewer_count")
-                        is_hidden = (raw_viewers == 0 or raw_viewers is None)
-
-                        last_known = 0
-                        if channel in known_channels and isinstance(known_channels[channel].get("lastViewers"), int):
-                            last_known = known_channels[channel]["lastViewers"]
-
-                        sort_value = last_known if is_hidden else (raw_viewers or 0)
-
-                        live_list.append({
-                            "channel": channel,
-                            "title": s.get("title") or "-",
-                            "viewers": f"HIDDEN (~{last_known:,})" if is_hidden else (raw_viewers or 0),
-                            "sortValue": sort_value,
-                            "language": s.get("language_code") or "-",
-                            "status": "LIVE (Hidden)" if is_hidden else "LIVE",
-                            "isHidden": is_hidden
-                        })
-
-                        currently_live.add(channel)
-
-                        known_channels[channel] = {
-                            "lastSeen": now,
-                            "lastTitle": s.get("title") or "-",
-                            "lastViewers": known_channels[channel]["lastViewers"] if is_hidden and channel in known_channels else (raw_viewers or 0),
-                            "wasLive": True
-                        }
-
-                    offline_list = []
-                    for ch, info in known_channels.items():
-                        if ch not in currently_live and info.get("wasLive"):
-                            offline_list.append({
-                                "channel": ch,
-                                "status": "Offline",
-                                "lastTitle": info.get("lastTitle", "-"),
-                                "lastViewers": info.get("lastViewers", 0),
-                                "offlineSince": f"{round((now - info.get('lastSeen', now)) / 60000)} menit lalu"
-                            })
-
-                    live_list.sort(key=lambda x: x["sortValue"], reverse=True)
-                    offline_list.sort(key=lambda x: known_channels.get(x["channel"], {}).get("lastSeen", 0), reverse=True)
-
-                    LIVE_RANKING_DATA = live_list
-                    OFFLINE_RANKING_DATA = offline_list[:50]
-
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error loop fetch kick drops: {e}")
 
         await asyncio.sleep(10)
 
