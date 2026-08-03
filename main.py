@@ -204,7 +204,9 @@ seen_campaign_ids: Set[str] = set()
 
 KICK_HEADERS = {
     "Authorization": f"Bearer {ACCESS_TOKEN}",
-    "Accept": "application/json",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://kick.com/",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 }
 
