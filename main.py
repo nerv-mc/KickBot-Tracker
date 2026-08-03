@@ -68,10 +68,15 @@ async def send_telegram_alert(streamer: str, value: str):
         pass
 
 # ---------------------------------------------------------
-# 1. SETUP DATABASE SQLITE & BACKUP SPREADSHEET
+# 1. SETUP DATABASE SQLITE & DUAL SPREADSHEET WEBHOOK
 # ---------------------------------------------------------
 DB_PATH = "/root/kick-bot-nerv/kick_drops.db"
+
+# Spreadsheet 1: Khusus log Drops Streamer
 SPREADSHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz9yDIiHhBlRXfjwsVcmaEHbS_8wvucVR46XmBttCZV0BRqWR7CmmweFM_jRIi_PH76uA/exec"
+
+# Spreadsheet 2: Khusus log License Key (Nama | License | Created Time | Expired Time)
+LICENSE_SPREADSHEET_WEBHOOK_URL = "GANTI_URL_WEBAPP_SPREADSHEET_LISENSI_BARU_DISINI"
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -109,18 +114,7 @@ def save_drop_to_db(streamer: str, code: str, value: str = "N/A", claimed_by: st
     conn.commit()
     conn.close()
 
-def get_license_expiry(license_key: str) -> str:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT expiry_date FROM licenses WHERE license_key = ?", (license_key,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return row[0]
-    default_expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
-    return default_expiry
-
-def generate_vip_license(days_valid: int = 30) -> tuple:
+def generate_vip_license(days_valid: int = 30, buyer: str = "General Buyer") -> tuple:
     alphabet = string.ascii_uppercase + string.digits
     chunk1 = "".join(secrets.choice(alphabet) for _ in range(4))
     chunk2 = "".join(secrets.choice(alphabet) for _ in range(4))
@@ -157,6 +151,24 @@ async def sync_to_spreadsheet_backup(streamer: str, value: str):
         }
         async with httpx.AsyncClient(timeout=5.0) as client:
             await client.post(SPREADSHEET_WEBHOOK_URL, json=payload)
+    except Exception:
+        pass
+
+async def sync_license_to_spreadsheet(license_key: str, expiry_str: str, days: int, buyer: str):
+    if not LICENSE_SPREADSHEET_WEBHOOK_URL or "GANTI_URL" in LICENSE_SPREADSHEET_WEBHOOK_URL:
+        return
+    try:
+        wib_time = datetime.now(timezone.utc) + timedelta(hours=7)
+        formatted_wib = wib_time.strftime("%Y-%m-%d %H:%M:%S")
+
+        payload = {
+            "nama": buyer,
+            "license": license_key,
+            "created_time": formatted_wib,
+            "expired_time": expiry_str
+        }
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(LICENSE_SPREADSHEET_WEBHOOK_URL, json=payload)
     except Exception:
         pass
 
@@ -325,13 +337,18 @@ async def startup_event():
 # 4. ADMIN & RECORD DROPS ENDPOINTS
 # ---------------------------------------------------------
 @app.get("/admin/generate-key")
-async def api_generate_key(days: int = 30, secret_admin_code: str = ""):
+async def api_generate_key(days: int = 30, buyer: str = "General Buyer", secret_admin_code: str = ""):
     if secret_admin_code != "yaudahadmin":
         return {"status": "error", "message": "Unauthorized"}
     
-    key, expiry = generate_vip_license(days)
+    key, expiry = generate_vip_license(days, buyer)
+    
+    # Kirim data ke Spreadsheet Lisensi khusus
+    asyncio.create_task(sync_license_to_spreadsheet(key, expiry, days, buyer))
+    
     return {
         "status": "success",
+        "buyer": buyer,
         "license_key": key,
         "expires_at": expiry,
         "duration_days": days
@@ -771,6 +788,7 @@ def vip_panel(request: Request, license: str = ""):
     html_content = html_content.replace("LICENSE_PLACEHOLDER", f"Master User ({license})")
 
     return HTMLResponse(content=html_content)
+
 @app.get("/api/v1/load-secure-script", response_class=PlainTextResponse)
 def load_secure_script(data: str):
     try:
