@@ -90,14 +90,17 @@ def init_db():
 init_db()
 
 def save_drop_to_db(streamer: str, code: str = "KICK-DROP", value: str = "N/A", claimed_by: str = "System", bot_id: str = None):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO drops (bot_id, streamer, code, value, claimed_by) VALUES (?, ?, ?, ?, ?)",
-        (bot_id, streamer, code, value, claimed_by)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO drops (bot_id, streamer, code, value, claimed_by) VALUES (?, ?, ?, ?, ?)",
+            (bot_id, streamer, code, value, claimed_by)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"DB Insert Error: {e}")
 
 async def sync_to_spreadsheet_backup(streamer: str, value: str):
     if not SPREADSHEET_WEBHOOK_URL:
@@ -250,8 +253,12 @@ async def startup_event():
     asyncio.create_task(fetch_kick_official_api_loop())
 
 # ---------------------------------------------------------
-# 4. ENDPOINTS UNTUK RECORD DROPS & TELEGRAM BROADCAST
+# 4. ENDPOINTS UTAMA & RECORD DROPS
 # ---------------------------------------------------------
+@app.get("/")
+async def root():
+    return {"status": "online", "message": "KickBot Tracker API is running smoothly!"}
+
 @app.post("/api/v1/record-drop")
 @app.post("/record-drop")
 async def record_drop(request: Request):
