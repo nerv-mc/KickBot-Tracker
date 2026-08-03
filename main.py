@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from typing import Set
 
 app = FastAPI(title="KickBot Tracker & Monitor API")
@@ -133,11 +134,7 @@ def decrypt_text(encrypted_text: str) -> str:
     decoded_bytes = base64.urlsafe_b64decode(encrypted_text.encode("utf-8"))
     return cipher.decrypt(decoded_bytes).decode("utf-8")
 
-def get_clean_base_url(request: Request) -> str:
-    host = request.headers.get("host", "kickbot-tracker.online")
-    return f"https://{host}"
-
-KICK_ACCESS_TOKEN = "MWI5ZDI4NDMTNDNJMI0ZY2FILTHHODUTMZRMZJQ5NTRIOGVK"
+KICK_ACCESS_TOKEN = "MWI5ZDI4NDMTNDNJMI0ZY2FILTHHODUTMZRZJQ5NTRIOGVK"
 CATEGORY_ID = 28
 LIMIT_LIVE = 1000
 
@@ -253,11 +250,129 @@ async def startup_event():
     asyncio.create_task(fetch_kick_official_api_loop())
 
 # ---------------------------------------------------------
-# 4. ENDPOINTS UTAMA & RECORD DROPS
+# 4. ENDPOINTS DASHBOARD HTML & API
 # ---------------------------------------------------------
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    return {"status": "online", "message": "KickBot Tracker API is running smoothly!"}
+    return """<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kick Bot - Live Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#0b0e14] text-gray-200 font-sans min-h-screen p-4 md:p-6">
+    <header class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center bg-[#131722] p-5 rounded-2xl border border-gray-800/80 mb-8 shadow-xl">
+        <div class="flex items-center space-x-4 mb-4 md:mb-0">
+            <div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center font-bold text-black text-2xl shadow-lg shadow-green-500/20">K</div>
+            <div>
+                <h1 class="text-xl font-bold text-white tracking-wide">Kick Bot - Live Tracker</h1>
+                <p class="text-xs text-gray-400">Official Kick API v2 Livestream Category Slot Harvester</p>
+            </div>
+        </div>
+        <button onclick="openLicenseModal()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs md:text-sm px-6 py-3 rounded-xl transition duration-200 flex items-center space-x-2 shadow-lg shadow-indigo-600/30">
+            <i class="fa-solid fa-key"></i>
+            <span>Buka Panel Manajemen Bot →</span>
+        </button>
+    </header>
+
+    <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <section class="lg:col-span-2 bg-[#131722] p-6 rounded-2xl border border-gray-800/80 shadow-xl">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
+                <h2 class="text-base font-bold text-white flex items-center space-x-2">
+                    <span class="text-red-500">🔥</span>
+                    <span>CATEGORY SLOTS LIVE RANKING (TOP 15 REAL-TIME)</span>
+                </h2>
+                <span class="text-[11px] text-gray-400 bg-gray-900/80 px-3 py-1 rounded-full border border-gray-800 w-max">
+                    Status: <span class="text-green-400 font-bold">● Live Connected</span>
+                </span>
+            </div>
+            <div id="streamer-list" class="space-y-3"></div>
+        </section>
+
+        <section class="bg-[#131722] p-6 rounded-2xl border border-gray-800/80 shadow-xl flex flex-col">
+            <div>
+                <h2 class="text-base font-bold text-white mb-1 flex items-center space-x-2">
+                    <span class="text-amber-400">🏆</span>
+                    <span>TOP DROPS STREAMER</span>
+                </h2>
+                <p class="text-xs text-gray-400 mb-6">Streamer dengan histori penerimaan drop terbanyak hari ini.</p>
+            </div>
+            <div id="top-drops-list" class="space-y-3 my-auto">
+                <div class="flex flex-col items-center justify-center py-12 text-center">
+                    <div class="w-16 h-16 bg-indigo-900/20 text-indigo-400 rounded-full flex items-center justify-center text-3xl mb-3 border border-indigo-800/40">🏆</div>
+                    <p class="text-xs font-medium text-gray-400">Menunggu data klaim drop pertama dari bot...</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="licenseModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-[#131722] border border-gray-800 p-6 rounded-2xl max-w-md w-full shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-white flex items-center space-x-2"><span>🔑 Masukkan License Key</span></h3>
+                <button onclick="closeLicenseModal()" class="text-gray-500 hover:text-white text-lg">✕</button>
+            </div>
+            <p class="text-xs text-gray-400 mb-6">Akses Panel Manajemen Bot khusus pengguna VIP yang memiliki lisensi aktif.</p>
+            <input type="text" id="licenseInput" placeholder="Contoh: VIP-KICK-2026" class="w-full bg-[#181e2b] border border-gray-700 text-white rounded-xl px-4 py-3 mb-4 focus:outline-none focus:border-indigo-500 text-sm">
+            <div class="flex space-x-3">
+                <button onclick="closeLicenseModal()" class="w-1/2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold py-2.5 rounded-xl text-sm transition">Batal</button>
+                <button onclick="submitLicense()" class="w-1/2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-xl text-sm transition shadow-lg shadow-indigo-600/30">Masuk Panel →</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const streamerData = [
+            { rank: 1, name: "hstikkytokky", tag: "FN", title: "WE BACK COMPUTER TOP", viewers: "6,717", priority: true },
+            { rank: 2, name: "schneckyrii", tag: "FN", title: "$45,000 BONUS HUNT CELEBRATION", viewers: "3,042", priority: true },
+            { rank: 3, name: "cdmatthews", tag: "SLOTS", title: "BONUS HUNT & GIVEAWAYS ACTIVE", viewers: "2,216", priority: false },
+            { rank: 4, name: "eddie", tag: "STAKE", title: "WEEKLY STAKE DROPS & STREAM", viewers: "1,850", priority: true },
+            { rank: 5, name: "trainwreckstv", tag: "SLOTS", title: "NON STOP SLOTS SESSION", viewers: "1,200", priority: false }
+        ];
+
+        function renderStreamers() {
+            const container = document.getElementById('streamer-list');
+            container.innerHTML = streamerData.map(s => `
+                <div class="bg-[#181e2b] p-4 rounded-xl flex items-center justify-between border border-gray-800/80 hover:border-gray-700 transition">
+                    <div class="flex items-center space-x-4">
+                        <span class="font-bold text-gray-500 text-xs w-5">#${s.rank}</span>
+                        <span class="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse"></span>
+                        <div>
+                            <h3 class="font-bold text-white text-sm">${s.name} <span class="text-green-400 text-xs">[${s.tag}]</span></h3>
+                            <p class="text-xs text-gray-500 truncate max-w-[200px] sm:max-w-xs">${s.title}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xs font-semibold text-green-400">${s.viewers} Viewers</span>
+                        ${s.priority ? `<span class="hidden sm:inline-block bg-indigo-900/50 text-indigo-300 border border-indigo-700/50 text-[10px] font-bold px-2 py-1 rounded-md">🔥 Priority</span>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+        renderStreamers();
+
+        function openLicenseModal() {
+            document.getElementById('licenseModal').classList.remove('hidden');
+            document.getElementById('licenseModal').classList.add('flex');
+        }
+
+        function closeLicenseModal() {
+            document.getElementById('licenseModal').classList.add('hidden');
+            document.getElementById('licenseModal').classList.remove('flex');
+        }
+
+        function submitLicense() {
+            const key = document.getElementById('licenseInput').value.trim();
+            if (key) {
+                window.location.href = `/panel?license=${encodeURIComponent(key)}`;
+            }
+        }
+    </script>
+</body>
+</html>"""
 
 @app.post("/api/v1/record-drop")
 @app.post("/record-drop")
