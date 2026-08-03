@@ -76,7 +76,7 @@ DB_PATH = "/root/kick-bot-nerv/kick_drops.db"
 SPREADSHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz9yDIiHhBlRXfjwsVcmaEHbS_8wvucVR46XmBttCZV0BRqWR7CmmweFM_jRIi_PH76uA/exec"
 
 # Spreadsheet 2: Khusus log License Key (Nama | License | Created Time | Expired Time)
-LICENSE_SPREADSHEET_WEBHOOK_URL = "https://docs.google.com/spreadsheets/d/1x5wIdNkGrzNhXCmoimSarGF93etL3_hLmFBV5XRn1rc/edit?gid=0#gid=0" # Ganti URL Web App Spreadsheet Lisensi lu di sini
+LICENSE_SPREADSHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyv7BxNqWckD-qDfEvipqK5-pYsKohXso91slmFLPddi9Tg9FvMNxokIFMfR7HhpIHVHg/exec" # Ganti URL Web App Spreadsheet Lisensi lu di sini
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
