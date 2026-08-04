@@ -12,9 +12,10 @@ from fastapi import FastAPI, Request
 from typing import Set
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse  # <-- Pastikan ini ada
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="KickBot Tracker API")
-
+app.mount("/static", StaticFiles(directory="static"), name="static")
 # Konfigurasi CORS agar frontend terpisah bisa mengakses backend ini
 app.add_middleware(
     CORSMiddleware,
