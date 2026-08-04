@@ -3,40 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <title>Kick Bot - Live Tracker</title>
+    <!-- Favicon Kustom -->
+    <link rel="icon" href="/static/logo.png" type="image/png">
+    
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 2rem; }
         .container { max-width: 1200px; margin: 0 auto; }
-        .header-banner { background: #111827; border: 1px solid #1e293b; border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 1.5rem; }
+        .header-banner { background: #111827; border: 1px solid #1e293b; border-radius: 12px; padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+        .logo-box { display: flex; align-items: center; gap: 15px; }
+        .logo-img { width: 48px; height: 48px; border-radius: 10px; object-fit: cover; }
+
+        .alert-banner { display: none; background: linear-gradient(90deg, #059669, #10b981); color: #fff; padding: 1rem 1.5rem; border-radius: 10px; margin-bottom: 1.5rem; justify-content: space-between; align-items: center; box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }
+        .alert-title { font-weight: bold; font-size: 1.1rem; display: flex; align-items: center; gap: 12px; }
+
+        .btn-streamer { background: rgba(0, 0, 0, 0.3); color: #fef08a; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; border: 1px solid rgba(254, 240, 138, 0.4); }
+        .btn-streamer:hover { background: #000; color: #fff; border-color: #fff; }
+
         .grid-layout { display: grid; grid-template-columns: 1.8fr 1.2fr; gap: 1.5rem; }
         .card { background: #111827; border: 1px solid #1e293b; border-radius: 12px; padding: 1.5rem; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .card-title { font-size: 1rem; font-weight: bold; color: #f8fafc; display: flex; align-items: center; gap: 8px; margin: 0; }
+        .status-live { font-size: 12px; color: #10b981; background: rgba(16, 185, 129, 0.1); padding: 4px 10px; border-radius: 12px; font-weight: bold; }
+
         table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
         td { padding: 12px; border-bottom: 1px solid #1e293b; font-size: 14px; }
+        .rank-num { color: #64748b; font-weight: bold; width: 30px; }
         .streamer-name { font-weight: bold; color: #f8fafc; text-decoration: none; }
         .category-tag { font-size: 11px; color: #10b981; font-weight: bold; margin-left: 6px; }
         .viewer-count { color: #10b981; font-weight: bold; text-align: right; }
+        .hidden-tag { background: #f59e0b; color: #000; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-left: 6px; }
         .drop-badge { background: #8b5cf6; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header-banner">
-            <h2>Kick Bot - Live Tracker</h2>
-            <span style="font-size:13px; color:#64748b;">Official Kick API v2 Livestream Category Slot Harvester</span>
+            <div class="logo-box">
+                <img src="/static/logo.png" alt="Logo" class="logo-img">
+                <div>
+                    <h2 style="margin:0; font-size:1.4rem;">Kick Bot - Live Tracker</h2>
+                    <span style="font-size:13px; color:#64748b;">Official Kick View & Drop Tracker</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="alert-banner" id="alert-banner">
+            <div class="alert-title">
+                🚨 NEW DROP DETECTED
+                <a href="#" target="_blank" class="btn-streamer" id="alert-streamer-btn">@streamer</a>
+            </div>
         </div>
 
         <div class="grid-layout">
             <div class="card">
-                <h3>🔥 SLOTS & CASINO LIVE RANKING (TOP 100 - BY VIEW)</h3>
-                <table><tbody id="ranking-tbody"><tr><td>Memuat data...</td></tr></tbody></table>
+                <div class="card-header">
+                    <h3 class="card-title">🔥 SLOTS & CASINO LIVE RANKING (TOP 100)</h3>
+                    <span class="status-live" id="status-badge">Status: • Fetching Kick v2 Direct...</span>
+                </div>
+                <table>
+                    <tbody id="ranking-tbody">
+                        <tr><td colspan="3" style="text-align:center; color:#64748b; padding:2rem;">Memuat data Slots & Casino dari Kick API v2...</td></tr>
+                    </tbody>
+                </table>
             </div>
+
             <div class="card">
-                <h3>🏆 TOP DROPS STREAMER (TOP 50)</h3>
-                <table><tbody id="drops-tbody"><tr><td>Memuat data...</td></tr></tbody></table>
+                <div class="card-header">
+                    <h3 class="card-title">🏆 TOP DROPS STREAMER</h3>
+                </div>
+                <table id="drops-table">
+                    <tbody id="drops-tbody">
+                        <tr><td colspan="3" style="text-align:center; color:#64748b; padding:2rem;">Menunggu data klaim drop pertama dari bot...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 
     <script>
+        let lastAlertId = null;
+        let alertTimer = null;
+
+        function formatLocalTime(utcTimeString) {
+            if(!utcTimeString) return '-';
+            try {
+                let parsedDate = new Date(utcTimeString.replace(' ', 'T') + 'Z');
+                if (isNaN(parsedDate.getTime())) {
+                    parsedDate = new Date(utcTimeString);
+                }
+                return parsedDate.toLocaleString(undefined, {
+                    year: 'numeric', month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                });
+            } catch(e) {
+                return utcTimeString;
+            }
+        }
+
         async function updateDashboardData() {
             try {
                 const res = await fetch('/api/v1/live-data');
@@ -46,16 +109,22 @@
                     if(data.rankings && data.rankings.length > 0) {
                         const tbody = document.getElementById('ranking-tbody');
                         tbody.innerHTML = '';
+
                         data.rankings.slice(0, 100).forEach((item, index) => {
                             const tr = document.createElement('tr');
+                            const viewerText = typeof item.viewers === 'number' ? item.viewers.toLocaleString() + ' Viewers' : item.viewers;
+
                             tr.innerHTML = `
-                                <td style="color:#64748b; font-weight:bold; width:30px;">#${index + 1}</td>
+                                <td class="rank-num">#${index + 1}</td>
                                 <td>
-                                    <a href="https://kick.com/${item.channel}" target="_blank" class="streamer-name">${item.channel}</a>
-                                    <span class="category-tag">[SLOTS]</span>
+                                    <div>
+                                        <a href="https://kick.com/${item.channel}" target="_blank" class="streamer-name">${item.channel}</a>
+                                        <span class="category-tag">[SLOTS]</span>
+                                        ${item.isHidden ? '<span class="hidden-tag">LIVE (Hidden)</span>' : ''}
+                                    </div>
                                     <div style="font-size:12px; color:#64748b;">${item.title || '-'}</div>
                                 </td>
-                                <td class="viewer-count">${item.viewers} Viewers</td>
+                                <td class="viewer-count">${viewerText}</td>
                             `;
                             tbody.appendChild(tr);
                         });
@@ -64,19 +133,53 @@
                     if(data.top_drops && data.top_drops.length > 0) {
                         const dropsTbody = document.getElementById('drops-tbody');
                         dropsTbody.innerHTML = '';
-                        data.top_drops.forEach((item, index) => {
+
+                        data.top_drops.slice(0, 50).forEach((item, index) => {
                             const tr = document.createElement('tr');
+                            const localFormattedTime = formatLocalTime(item.last_drop_time);
+
                             tr.innerHTML = `
-                                <td style="color:#64748b; font-weight:bold; width:30px;">#${index + 1}</td>
-                                <td class="streamer-name">${item.streamer}</td>
-                                <td style="text-align:right;"><span class="drop-badge">${item.total_drops} Drops</span></td>
+                                <td class="rank-num">#${index + 1}</td>
+                                <td>
+                                    <a href="https://kick.com/${item.streamer}" target="_blank" class="streamer-name">${item.streamer}</a>
+                                    <div style="font-size:12px; color:#64748b;">Last Drops: <b style="color:#34d399;">${localFormattedTime}</b></div>
+                                </td>
+                                <td style="text-align:right;">
+                                    <span class="drop-badge">${item.total_drops} Drops</span>
+                                </td>
                             `;
                             dropsTbody.appendChild(tr);
                         });
                     }
+
+                    if(data.latest_alert && data.latest_alert.id !== lastAlertId) {
+                        const currentNow = Math.floor(Date.now() / 1000);
+                        const dropAgeSeconds = currentNow - data.latest_alert.timestamp;
+
+                        if (dropAgeSeconds < 120) {
+                            lastAlertId = data.latest_alert.id;
+                            const banner = document.getElementById('alert-banner');
+                            const streamerBtn = document.getElementById('alert-streamer-btn');
+
+                            streamerBtn.innerText = `@${data.latest_alert.streamer}`;
+                            streamerBtn.href = `https://kick.com/${data.latest_alert.streamer}`;
+
+                            banner.style.display = 'flex';
+
+                            if (alertTimer) clearTimeout(alertTimer);
+                            const remainingMs = (120 - dropAgeSeconds) * 1000;
+                            alertTimer = setTimeout(() => {
+                                banner.style.display = 'none';
+                            }, remainingMs);
+                        }
+                    } else if (!data.latest_alert) {
+                        document.getElementById('alert-banner').style.display = 'none';
+                    }
+
+                    document.getElementById('status-badge').innerText = 'Status: • Live Connected (' + new Date().toLocaleTimeString() + ')';
                 }
             } catch(e) {
-                console.error("Gagal memuat data:", e);
+                document.getElementById('status-badge').innerText = 'Status: ⚠️ Reconnecting...';
             }
         }
 
