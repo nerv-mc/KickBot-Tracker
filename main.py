@@ -25,37 +25,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TELEGRAM_BOT_TOKEN = "GANTI_TOKEN"
-TELEGRAM_CHAT_ID = "GANTI_CHAT_ID"
+TELEGRAM_BOT_TOKEN = "7993820592:AAEY5ekIXdi0AyCCCNUZhQpLrV1quFmAX54"
+TELEGRAM_CHAT_ID = "@KickLive_Tracker"
 
 async def send_telegram_alert(streamer: str, value: str):
-    if not TELEGRAM_BOT_TOKEN or "GANTI_TOKEN" in TELEGRAM_BOT_TOKEN:
-        return
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        wib_time = datetime.now(timezone.utc) + timedelta(hours=7)
-        drop_time_formatted = wib_time.strftime("%H:%M:%S")
-        expired_time_formatted = (wib_time + timedelta(minutes=10)).strftime("%H:%M:%S")
+  if not TELEGRAM_BOT_TOKEN or "GANTI_TOKEN" in TELEGRAM_BOT_TOKEN:
+    print("[TELEGRAM ERROR] Token belum dikonfigurasi dengan benar!")
+    return
+  try:
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    wib_time = datetime.now(timezone.utc) + timedelta(hours=7)
+    drop_time_formatted = wib_time.strftime("%H:%M:%S")
+    expired_time_formatted = (wib_time + timedelta(minutes=10)).strftime(
+        "%H:%M:%S"
+    )
 
-        stream_url = f"https://kick.com/{streamer}"
-        message_text = (
-            f"<b>[KICK DROP DETECTED!]</b>\n\n"
-            f"👤 <a href='{stream_url}'>@{streamer}</a>\n"
-            f"🎁 <b>Value:</b> {value}\n"
-            f"⏰ <b>Waktu Rilis:</b> {drop_time_formatted} - <b>Hangus:</b> {expired_time_formatted} WIB\n\n"
-            f"<b>JOIN!!</b>"
-        )
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message_text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(url, json=payload)
-    except Exception:
-        pass
-
+    stream_url = f"https://kick.com/{streamer}"
+    message_text = (
+        f"<b>[KICK DROP DETECTED!]</b>\n\n"
+        f"👤 <a href='{stream_url}'>@{streamer}</a>\n"
+        f"🎁 <b>Value:</b> {value}\n"
+        f"⏰ <b>Waktu Rilis:</b> {drop_time_formatted} - <b>Hangus:</b>"
+        f" {expired_time_formatted} WIB\n\n"
+        f"<b>JOIN!!</b>"
+    )
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message_text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    async with httpx.AsyncClient(timeout=5.0) as client:
+      response = await client.post(url, json=payload)
+      if response.status_code != 200:
+        print(f"[TELEGRAM GAGAL] Status: {response.status_code} - {response.text}")
+      else:
+        print(f"[TELEGRAM BERHASIL] Notifikasi terkirim untuk @{streamer}")
+  except Exception as e:
+    print(f"[TELEGRAM EXCEPTION] Terjadi kesalahan: {e}")
 # ---------------------------------------------------------
 # ROUTE UTAMA UNTUK DASHBOARD FRONTEND
 # ---------------------------------------------------------
@@ -103,15 +110,21 @@ def save_drop_to_db(streamer: str, code: str, value: str = "N/A", claimed_by: st
     conn.close()
 
 async def sync_to_spreadsheet_backup(streamer: str, value: str):
-    if not SPREADSHEET_WEBHOOK_URL:
-        return
-    try:
-        wib_time = datetime.now(timezone.utc) + timedelta(hours=7)
-        payload = {"timestamp": wib_time.strftime("%Y-%m-%d %H:%M:%S"), "streamer": streamer, "value": value}
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(SPREADSHEET_WEBHOOK_URL, json=payload)
-    except Exception:
-        pass
+  if not SPREADSHEET_WEBHOOK_URL:
+    return
+  try:
+    wib_time = datetime.now(timezone.utc) + timedelta(hours=7)
+    payload = {
+        "timestamp": wib_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "streamer": streamer,
+        "value": value,
+    }
+    async with httpx.AsyncClient(timeout=5.0) as client:
+      response = await client.post(SPREADSHEET_WEBHOOK_URL, json=payload)
+      if response.status_code != 200:
+        print(f"[WEBHOOK GAGAL] Status: {response.status_code} - {response.text}")
+  except Exception as e:
+    print(f"[WEBHOOK EXCEPTION] Terjadi kesalahan: {e}")
 
 # ---------------------------------------------------------
 # KICK API CONFIGURATION
@@ -222,30 +235,49 @@ async def startup_event():
 
 @app.get("/api/v1/live-data")
 def get_live_data():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    # TOP DROPS STREAMER dibatasi 50 sesuai permintaan sebelumnya
-    cursor.execute("""
+  conn = sqlite3.connect(DB_PATH)
+  cursor = conn.cursor()
+
+  cursor.execute("""
         SELECT streamer, count(*) as total_drops, max(timestamp) as last_drop_time
         FROM drops GROUP BY streamer ORDER BY total_drops DESC LIMIT 50
     """)
-    rows = cursor.fetchall()
-    
-    cursor.execute("SELECT streamer, value, timestamp FROM drops ORDER BY id DESC LIMIT 5")
-    raw_drops = [{"streamer": r[0], "value": r[1], "timestamp": r[2]} for r in cursor.fetchall()]
-    conn.close()
+  rows = cursor.fetchall()
 
-    top_drops_streamers = [{"streamer": r[0], "total_drops": r[1], "last_drop_time": r[2]} for r in rows]
+  cursor.execute(
+      "SELECT streamer, value, timestamp FROM drops ORDER BY id DESC LIMIT 5"
+  )
+  raw_drops = [
+      {"streamer": r[0], "value": r[1], "timestamp": r[2]}
+      for r in cursor.fetchall()
+  ]
+  conn.close()
 
-    global LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
-    active_alert = LATEST_ALERT_DROP
-    if active_alert and (time.time() - LAST_DROP_TIMESTAMP > 120):
-        active_alert = None
+  top_drops_streamers = [
+      {"streamer": r[0], "total_drops": r[1], "last_drop_time": r[2]}
+      for r in rows
+  ]
 
-    return {
-        "status": "success",
-        "rankings": LIVE_RANKING_DATA,
-        "top_drops": top_drops_streamers,
-        "drops": raw_drops,
-        "latest_alert": active_alert
-    }
+  # Ambil daftar nama streamer yang punya priority drop dari database
+  priority_streamers = {r[0].lower() for r in rows}
+
+  # Buat salinan data ranking dengan penanda isPriority
+  rankings_with_priority = []
+  for item in LIVE_RANKING_DATA:
+    item_copy = dict(item)
+    channel_name = str(item_copy.get("channel", "")).lower()
+    item_copy["isPriority"] = channel_name in priority_streamers
+    rankings_with_priority.append(item_copy)
+
+  global LATEST_ALERT_DROP, LAST_DROP_TIMESTAMP
+  active_alert = LATEST_ALERT_DROP
+  if active_alert and (time.time() - LAST_DROP_TIMESTAMP > 120):
+    active_alert = None
+
+  return {
+      "status": "success",
+      "rankings": rankings_with_priority,
+      "top_drops": top_drops_streamers,
+      "drops": raw_drops,
+      "latest_alert": active_alert,
+  }

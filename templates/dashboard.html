@@ -30,6 +30,7 @@
         .rank-num { color: #64748b; font-weight: bold; width: 30px; }
         .streamer-name { font-weight: bold; color: #f8fafc; text-decoration: none; }
         .category-tag { font-size: 11px; color: #10b981; font-weight: bold; margin-left: 6px; }
+        .priority-tag { font-size: 11px; color: #ef4444; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-left: 6px; }
         .viewer-count { color: #10b981; font-weight: bold; text-align: right; }
         .hidden-tag { background: #f59e0b; color: #000; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-left: 6px; }
         .drop-badge { background: #8b5cf6; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: bold; }
@@ -120,6 +121,7 @@
                                     <div>
                                         <a href="https://kick.com/${item.channel}" target="_blank" class="streamer-name">${item.channel}</a>
                                         <span class="category-tag">[SLOTS]</span>
+                                        ${item.isPriority ? '<span class="priority-tag">[PRIORITY DROP]</span>' : ''}
                                         ${item.isHidden ? '<span class="hidden-tag">LIVE (Hidden)</span>' : ''}
                                     </div>
                                     <div style="font-size:12px; color:#64748b;">${item.title || '-'}</div>
